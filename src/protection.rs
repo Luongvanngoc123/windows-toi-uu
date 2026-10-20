@@ -33,6 +33,10 @@ pub fn default_profiles() -> Vec<BlockProfile> {
             &[
                 "wps.com",
                 "www.wps.com",
+                "vi.wps.com",
+                "wps.cn",
+                "www.wps.cn",
+                "official-package.wpscdn.cn",
                 "wdl1.pcfg.cache.wpscdn.com",
                 "wdl1.cache.wps.cn",
                 "pc.wps.cn",
@@ -68,14 +72,34 @@ fn profiles_path() -> Result<PathBuf, String> {
 }
 
 pub fn load_profiles() -> Result<Vec<BlockProfile>, String> {
-    let path = profiles_path()?;
+    load_profiles_at(&profiles_path()?)
+}
+
+fn load_profiles_at(path: &std::path::Path) -> Result<Vec<BlockProfile>, String> {
     if !path.exists() {
         return Ok(default_profiles());
     }
-    let contents = fs::read(&path).map_err(|e| format!("Read protection settings: {e}"))?;
-    let profiles: Vec<BlockProfile> = serde_json::from_slice(&contents)
+    let contents = fs::read(path).map_err(|e| format!("Read protection settings: {e}"))?;
+    let mut profiles: Vec<BlockProfile> = serde_json::from_slice(&contents)
         .map_err(|e| format!("Protection settings are invalid: {e}"))?;
     validate_profiles(&profiles)?;
+    // Upgrade saved presets too, while preserving selections, additions and removed profiles.
+    for preset in default_profiles() {
+        if let Some(profile) = profiles
+            .iter_mut()
+            .find(|profile| profile.builtin && profile.id == preset.id)
+        {
+            for domain in preset.domains {
+                if !profile
+                    .domains
+                    .iter()
+                    .any(|existing| existing.trim_end_matches('.').eq_ignore_ascii_case(&domain))
+                {
+                    profile.domains.push(domain);
+                }
+            }
+        }
+    }
     Ok(profiles)
 }
 
@@ -440,12 +464,19 @@ mod tests {
         let mut profiles = default_profiles();
         profiles.iter_mut().find(|p| p.id == "wps").unwrap().enabled = true;
         let wps = blocked_domains(&profiles).unwrap();
+        for domain in ["vi.wps.com", "official-package.wpscdn.cn"] {
+            assert!(wps.contains(domain));
+        }
 
         for _ in 0..3 {
             replace_hosts(&path, &backup_dir, &wps).unwrap();
             let blocked = fs::read(&path).unwrap();
             assert_eq!(render_hosts(&blocked, &wps).unwrap(), blocked);
             assert!(blocked.starts_with(original));
+            let blocked = String::from_utf8(blocked).unwrap();
+            for domain in ["vi.wps.com", "official-package.wpscdn.cn"] {
+                assert!(blocked.contains(&format!("0.0.0.0 {domain}\r\n:: {domain}\r\n")));
+            }
         }
         assert_eq!(fs::read_dir(&backup_dir).unwrap().count(), 1);
 
@@ -486,6 +517,54 @@ mod tests {
             );
             assert!(!path.with_extension("json.tmp").exists());
         }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn saved_wps_preset_gets_new_hosts_without_changing_user_choices() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("velo-preset-test-{}-{stamp}", std::process::id()));
+        let path = directory.join("protection.json");
+        let legacy: Vec<BlockProfile> = serde_json::from_str(
+            r#"[{"id":"wps","name":"WPS Office","domains":["wps.com","www.wps.com","wdl1.pcfg.cache.wpscdn.com","wdl1.cache.wps.cn","pc.wps.cn","platform.wps.cn","extra.example.com"],"enabled":true,"builtin":true},{"id":"custom","name":"Custom","domains":["custom.example.com"],"enabled":false,"builtin":false}]"#,
+        )
+        .unwrap();
+        save_profiles_at(&path, &legacy).unwrap();
+        let original = fs::read(&path).unwrap();
+        let upgraded = load_profiles_at(&path).unwrap();
+        assert_eq!(upgraded.len(), 2);
+        assert!(upgraded[0].enabled);
+        assert_eq!(upgraded[0].name, legacy[0].name);
+        assert!(upgraded[0].domains.contains(&"extra.example.com".into()));
+        assert!(upgraded[0].domains.contains(&"vi.wps.com".into()));
+        assert!(
+            upgraded[0]
+                .domains
+                .contains(&"official-package.wpscdn.cn".into())
+        );
+        assert_eq!(upgraded[1].domains, legacy[1].domains);
+        assert!(!upgraded[1].enabled);
+        assert_eq!(fs::read(&path).unwrap(), original);
+
+        let mut disabled = upgraded;
+        disabled[0].enabled = false;
+        disabled[0].domains[0] = "WPS.COM.".into();
+        save_profiles_at(&path, &disabled).unwrap();
+        let loaded_again = load_profiles_at(&path).unwrap();
+        assert!(!loaded_again[0].enabled);
+        assert_eq!(loaded_again[0].domains, disabled[0].domains);
+
+        disabled[0].builtin = false;
+        disabled[0].domains = vec!["custom-wps.example.com".into()];
+        save_profiles_at(&path, &disabled).unwrap();
+        assert_eq!(
+            load_profiles_at(&path).unwrap()[0].domains,
+            disabled[0].domains
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 }

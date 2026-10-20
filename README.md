@@ -13,6 +13,7 @@ Mở `Velo.exe` trong thư mục phát hành. App mặc định yêu cầu quy�
 - CPU, RAM, thời gian hoạt động và tiến trình dùng nhiều RAM, cập nhật mỗi 2 giây.
 - Bật/tắt mục Run và thư mục Startup bằng cơ chế StartupApproved của Windows, không xóa lệnh gốc.
 - Danh sách chặn tên miền tải ứng dụng, có cấu hình sẵn cho WPS Office và 360 Security. Thêm ứng dụng của bạn bằng tên và các tên miền tải chính xác.
+- Cấu hình WPS gồm trang tiếng Việt `vi.wps.com` và máy chủ bộ cài `official-package.wpscdn.cn`. Khi nâng phiên bản, các cấu hình có sẵn đã lưu được bổ sung tên miền mới; giữ nguyên lựa chọn bật/tắt, cấu hình tùy chỉnh và mục đã xóa. Bấm **Áp dụng chặn tải** để cập nhật hosts.
 - Sao lưu hosts trước khi thay đổi và gỡ riêng quy tắc do Velo quản lý.
 - Quét rồi dọn file tạm người dùng cũ hơn 24 giờ; bỏ qua file đang dùng và đường dẫn liên kết.
 - Thu gọn working set RAM theo yêu cầu.
