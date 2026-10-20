@@ -267,17 +267,21 @@ impl Velo {
                 Event::Job(result) => {
                     self.finish_job(result);
                 }
-                Event::Protection(result) => {
+                Event::Protection(mut result) => {
                     if result.is_ok() {
                         match protection::load_profiles() {
                             Ok(profiles) => {
-                                self.dirty =
-                                    !protection::profiles_match_hosts(&profiles).unwrap_or(false);
                                 self.profiles = profiles;
                             }
-                            Err(e) => {
-                                self.finish_job(Err(e));
-                                continue;
+                            Err(e) => result = Err(e),
+                        }
+                    }
+                    match protection::profiles_match_hosts(&self.profiles) {
+                        Ok(matches) => self.dirty = !matches,
+                        Err(e) => {
+                            self.dirty = true;
+                            if result.is_ok() {
+                                result = Err(e);
                             }
                         }
                     }
@@ -384,7 +388,7 @@ impl Velo {
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.label(
-                        RichText::new("v0.1.0  /  Rust native")
+                        RichText::new(concat!("v", env!("CARGO_PKG_VERSION"), "  /  Rust native"))
                             .size(11.0)
                             .color(Color32::from_gray(132)),
                     );
@@ -822,10 +826,21 @@ impl Velo {
         ui.label("Lệnh PowerShell của Chris Titus:");
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            ui.code("irm https://christitus.com/win | iex");
+            if ui
+                .add_enabled(
+                    self.admin,
+                    egui::Button::new(RichText::new(system::WINUTIL_COMMAND).monospace()),
+                )
+                .on_hover_text("Mở PowerShell quản trị và chạy WinUtil")
+                .clicked()
+            {
+                self.job("Đang mở WinUtil…", || {
+                    system::launch_winutil()?;
+                    Ok("Đã mở PowerShell để chạy WinUtil. Kết quả tải và chạy hiển thị trong cửa sổ PowerShell.".into())
+                });
+            }
             if ui.button("Sao chép").clicked() {
-                ui.ctx()
-                    .copy_text("irm https://christitus.com/win | iex".into());
+                ui.ctx().copy_text(system::WINUTIL_COMMAND.into());
             }
         });
         ui.add_space(8.0);

@@ -12,6 +12,7 @@ const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const APPROVED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const TEMP_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+pub const WINUTIL_COMMAND: &str = "irm https://christitus.com/win | iex";
 
 #[derive(Clone, Debug)]
 pub struct StartupEntry {
@@ -561,9 +562,46 @@ pub fn restart_as_admin() -> Result<(), String> {
     shell_open(exe.as_os_str(), "runas")
 }
 
+fn winutil_command(system_root: &Path) -> Command {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NEW_CONSOLE;
+    let mut command =
+        Command::new(system_root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
+    command
+        .args(["-NoProfile", "-NoExit", "-Command", WINUTIL_COMMAND])
+        .creation_flags(CREATE_NEW_CONSOLE);
+    command
+}
+
+pub fn launch_winutil() -> Result<(), String> {
+    if !is_admin() {
+        return Err("Run Velo as Administrator to launch WinUtil.".into());
+    }
+    let system_root = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .ok_or("SystemRoot is missing.")?;
+    winutil_command(&system_root)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Cannot open PowerShell for WinUtil: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn winutil_uses_system_powershell_and_the_displayed_command() {
+        let command = winutil_command(Path::new(r"C:\Windows"));
+        assert_eq!(
+            command.get_program(),
+            std::ffi::OsStr::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        );
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-NoProfile", "-NoExit", "-Command", WINUTIL_COMMAND].map(std::ffi::OsStr::new)
+        );
+    }
 
     #[test]
     fn registry_strings_stop_at_nul() {

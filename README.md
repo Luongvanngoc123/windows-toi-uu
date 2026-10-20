@@ -18,7 +18,7 @@ Mở `Velo.exe` trong thư mục phát hành. App mặc định yêu cầu quy�
 - Thu gọn working set RAM theo yêu cầu.
 - Chuyển giữa chế độ nguồn Cân bằng và Hiệu năng cao.
 - Kiểm tra Visual C++ 2015+ x86/x64, .NET Desktop 8/10 x64 và WebView2; tự cài các gói còn thiếu được chọn bằng WinGet.
-- Liên kết WinUtil chính thức của Chris Titus Tech, lệnh có thể sao chép, và lối mở cài đặt Windows.
+- Bấm lệnh WinUtil chính thức của Chris Titus Tech để mở PowerShell quản trị và chạy trực tiếp; vẫn có nút sao chép và lối mở cài đặt Windows.
 - Nhật ký kết quả trong phiên làm việc.
 
 ## Giới hạn cần biết
@@ -31,7 +31,7 @@ Thu gọn RAM chỉ có hiệu quả tạm thời; ứng dụng sẽ nạp lại
 
 File tạm đã dọn không đi vào Recycle Bin và không thể hoàn tác. Có bước xác nhận trước khi xóa. Hãy đóng bộ cài và công việc quan trọng trước khi dọn.
 
-Velo chỉ liên kết tới WinUtil. Lệnh `irm https://christitus.com/win | iex` tải và thực thi mã bên ngoài, do người dùng chủ động chạy. Velo không phải sản phẩm của Chris Titus Tech.
+Bấm lệnh `irm https://christitus.com/win | iex` trong mục **Công cụ** sẽ mở PowerShell bằng quyền quản trị và chạy WinUtil. Lệnh tải và thực thi mã bên ngoài; kết quả hiển thị trong cửa sổ PowerShell. Velo không phải sản phẩm của Chris Titus Tech.
 
 Mục **Thư viện** cần WinGet (App Installer) và Internet. Chọn các gói, rồi bấm cài một lượt. Có bước xác nhận điều khoản nguồn và giấy phép gói. Nếu chưa có WinGet, app mở trang App Installer chính thức của Microsoft để bạn cài. Phát hiện runtime dựa trên Registry/thư mục cài chuẩn; không bao gồm mọi thư viện của từng game hoặc yêu cầu phiên bản riêng của từng ứng dụng. Không tự cài khi mở Velo.
 

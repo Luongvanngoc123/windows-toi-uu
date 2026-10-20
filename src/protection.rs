@@ -80,8 +80,11 @@ pub fn load_profiles() -> Result<Vec<BlockProfile>, String> {
 }
 
 pub fn save_profiles(profiles: &[BlockProfile]) -> Result<(), String> {
+    save_profiles_at(&profiles_path()?, profiles)
+}
+
+fn save_profiles_at(path: &std::path::Path, profiles: &[BlockProfile]) -> Result<(), String> {
     validate_profiles(profiles)?;
-    let path = profiles_path()?;
     fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let bytes = serde_json::to_vec_pretty(profiles).map_err(|e| e.to_string())?;
     let temporary = path.with_extension("json.tmp");
@@ -236,13 +239,8 @@ pub fn restore_hosts() -> Result<(), String> {
 fn update_hosts(domains: &BTreeSet<String>) -> Result<(), String> {
     let path = hosts_path();
     replace_hosts(&path, &data_dir()?.join("backups"), domains)?;
-    // Windows and browsers may keep their own DNS cache; this clears the OS cache only.
-    let ipconfig = PathBuf::from(std::env::var_os("SystemRoot").ok_or("SystemRoot is missing.")?)
-        .join(r"System32\ipconfig.exe");
-    let _ = hidden_command(ipconfig.to_str().ok_or("Invalid Windows path.")?)
-        .arg("/flushdns")
-        .output();
-    Ok(())
+    // Clear again even if hosts was unchanged: a retry must also refresh the resolver cache.
+    flush_dns_cache()
 }
 
 fn replace_hosts(
@@ -283,6 +281,9 @@ fn replace_hosts(
         return Err(format!(
             "Replace hosts file; run Velo as administrator: {error}"
         ));
+    }
+    if fs::read(path).map_err(|e| format!("Verify hosts file: {e}"))? != updated {
+        return Err("Hosts không giữ được quy tắc vừa ghi. Kiểm tra phần mềm đang bảo vệ file hosts rồi áp dụng lại.".into());
     }
     Ok(())
 }
@@ -326,16 +327,23 @@ fn replace_existing_file(
 }
 
 #[cfg(windows)]
-fn hidden_command(program: &str) -> std::process::Command {
-    use std::os::windows::process::CommandExt;
-    let mut command = std::process::Command::new(program);
-    command.creation_flags(0x08000000);
-    command
+fn flush_dns_cache() -> Result<(), String> {
+    #[link(name = "dnsapi")]
+    unsafe extern "system" {
+        fn DnsFlushResolverCache() -> i32;
+    }
+    if unsafe { DnsFlushResolverCache() } == 0 {
+        return Err(format!(
+            "Đã ghi hosts nhưng không làm mới được bộ nhớ DNS của Windows: {}. Hãy áp dụng lại.",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]
-fn hidden_command(program: &str) -> std::process::Command {
-    std::process::Command::new(program)
+fn flush_dns_cache() -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -414,5 +422,70 @@ mod tests {
         replace_hosts(&path, &backup_dir, &BTreeSet::new()).unwrap();
         assert_eq!(fs::read(&path).unwrap(), original);
         fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn repeated_wps_apply_change_remove_and_reapply() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("velo-wps-test-{}-{stamp}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("hosts");
+        let backup_dir = directory.join("backups");
+        let original = b"127.0.0.1 localhost\r\n0.0.0.0 untouched.example.com\r\n";
+        fs::write(&path, original).unwrap();
+        let mut profiles = default_profiles();
+        profiles.iter_mut().find(|p| p.id == "wps").unwrap().enabled = true;
+        let wps = blocked_domains(&profiles).unwrap();
+
+        for _ in 0..3 {
+            replace_hosts(&path, &backup_dir, &wps).unwrap();
+            let blocked = fs::read(&path).unwrap();
+            assert_eq!(render_hosts(&blocked, &wps).unwrap(), blocked);
+            assert!(blocked.starts_with(original));
+        }
+        assert_eq!(fs::read_dir(&backup_dir).unwrap().count(), 1);
+
+        profiles.iter_mut().find(|p| p.id == "360").unwrap().enabled = true;
+        replace_hosts(&path, &backup_dir, &blocked_domains(&profiles).unwrap()).unwrap();
+        let updated = fs::read_to_string(&path).unwrap();
+        assert!(updated.contains("0.0.0.0 wps.com\r\n"));
+        assert!(updated.contains("0.0.0.0 360.cn\r\n"));
+        assert_eq!(updated.matches(BEGIN).count(), 1);
+
+        replace_hosts(&path, &backup_dir, &BTreeSet::new()).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), original);
+        replace_hosts(&path, &backup_dir, &wps).unwrap();
+        let blocked_again = fs::read(&path).unwrap();
+        assert_eq!(render_hosts(original, &wps).unwrap(), blocked_again);
+        assert_eq!(fs::read_dir(&backup_dir).unwrap().count(), 4);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn profile_settings_can_be_overwritten_repeatedly() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("velo-settings-test-{}-{stamp}", std::process::id()));
+        let path = directory.join("protection.json");
+        let mut profiles = default_profiles();
+        for enabled in [false, true, false, true] {
+            profiles.iter_mut().find(|p| p.id == "wps").unwrap().enabled = enabled;
+            save_profiles_at(&path, &profiles).unwrap();
+            let saved: Vec<BlockProfile> =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                saved.iter().find(|p| p.id == "wps").unwrap().enabled,
+                enabled
+            );
+            assert!(!path.with_extension("json.tmp").exists());
+        }
+        fs::remove_dir_all(directory).unwrap();
     }
 }
